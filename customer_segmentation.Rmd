@@ -1,0 +1,191 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Component 3
+
+steps:importing data
+      removing null values
+      removing outliers
+      scaling the data to normalize the data
+      Verifying all data points in each field are of same format
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(lubridate)
+library(caret)
+setwd("G:/LILTHOMA/Rise_Wpu/Mentor_Mind/Identify_customer_segments_for_online_retail_using_K-means")
+customer_data <- read_excel("Online Retail.xlsx")
+View(customer_data)
+
+null_values <- colSums(is.na(customer_data))
+```
+
+
+```{r}
+null_df <- data.frame(null_values)
+print(sum(duplicated(customer_data)))
+null_df%>%mutate(percentage=null_values/nrow(customer_data))
+
+```
+ #CustomerID has 24% data missing and Description has less than 1% missing values
+ #5268 duplicated values are present
+```{r}
+clean_df <- customer_data%>%
+  filter_all(all_vars(!is.na(.)))
+removed_data <- customer_data%>%
+  filter_all(any_vars(is.na(.)))
+clean_df
+```
+Now we check the str of data to understand the format of each field if there is any changes required we will implement the and edit where changes are required
+
+
+
+```{r}
+#Removing Duplicates
+final_df <-distinct(clean_df)
+print(sum(duplicated(final_df)))
+```
+#We have data from december 2010 to november 2011
+```{r}
+final_df$month <-month(final_df$InvoiceDate)
+summary(final_df$month)
+```
+
+```{r}
+#finding outliers UnitPrice
+
+q1_price <- quantile(final_df$UnitPrice,0.25,na.rm=T)
+q3_price <-quantile(final_df$UnitPrice,0.75,na.rm=T)
+iqr<-q3_price - q1_price
+lower_bound_price = q1_price - 1.5*iqr
+upper_bound_price =q3_price + 1.5*iqr
+outliers <- final_df$UnitPrice[final_df$UnitPrice < lower_bound_price | final_df$UnitPrice > upper_bound_price]
+final_df$UnitPrice <- ifelse(final_df$UnitPrice %in% outliers, NA, final_df$UnitPrice)
+
+
+```
+
+
+```{r}
+boxplot(final_df$UnitPrice)
+```
+
+
+```{r}
+#finding outliers Quantity
+
+q1_quant <- quantile(final_df$Quantity,0.25,na.rm=T)
+q3_quant <-quantile(final_df$Quantity,0.75,na.rm=T)
+iqr<-q3_quant - q1_quant
+lower_bound_quant = q1_quant - 1.5*iqr
+upper_bound_quant =q3_quant + 1.5*iqr
+outliers_quant <- final_df$Quantity[final_df$Quantity < lower_bound_quant | final_df$Quantity > upper_bound_quant]
+final_df$Quantity <- ifelse(final_df$Quantity %in% outliers_quant, NA, final_df$Quantity)
+boxplot(final_df$Quantity)
+
+```
+
+
+```{r}
+sum(is.na(final_df))
+new_data <- final_df%>%filter_all(all_vars(!is.na(.)))
+sum(is.na(new_data))
+```
+```{r}
+print(new_data%>%group_by(CustomerID)%>%count()%>%arrange(-n)%>%head(30))
+new_data%>%group_by(StockCode)%>%count()%>%arrange(-n)%>%head(30)
+new_data%>%group_by(InvoiceNo)%>%count()%>%arrange(-n)%>%head(30)
+sum(duplicated(new_data))
+
+```
+
+
+#We have finished the data preperation process
+1)removed null values
+2)extracted month values
+3)removed outiers from the data
+
+#doubts 
+invoice number stock code and customer Id are the unique fields
+
+```{r}
+library(stringr)
+new_data$StockCode <- str_replace(new_data$StockCode, "[A-Za-z]$", "")
+new_data$StockCode <- as.numeric(new_data$StockCode)
+new_data$InvoiceNo <- str_replace(new_data$InvoiceNo, "[A-Za-z]$", "")
+new_data$InvoiceNo <- as.numeric(new_data$InvoiceNo)
+str(new_data)
+
+
+#Final cleaned values with no inconsistent data formats and no null or dupicate values
+cleaned_data <-new_data%>%filter_all(all_vars(!is.na(.)))
+sum(is.na(cleaned_data))
+
+```
+
+```{r}
+str(cleaned_data)
+selected_df <- cleaned_data%>%select(c(InvoiceNo,StockCode,month,UnitPrice,Quantity))
+selected_df_scaled <-scale(selected_df,center=TRUE)
+
+```
+
+
+
+```{r}
+#install.packages("factoextra")
+library(factoextra)
+#methods : wss silhouette gap_stat
+
+```
+```{r}
+
+find_k <-selected_df 
+set.seed(123)
+sample_indices <- sample(nrow(find_k), size = 1000)  # You can adjust the sample size as needed
+sample_data <- find_k[sample_indices, ]
+
+# Convert the sample data to a matrix
+sample_matrix <- as.matrix(sample_data)
+
+# Compute the number of clusters using the within-cluster sum of squares (wss)
+wss <- fviz_nbclust(sample_matrix, kmeans, method = "wss")
+gap_stat <- fviz_nbclust(sample_matrix, kmeans, method = "gap_stat")
+silhouette <- fviz_nbclust(sample_matrix, kmeans, method = "silhouette")
+
+# Print the result
+print(wss)
+print(gap_stat)
+print(silhouette)
+```
+
+
+
+
+
+```{r}
+kmeans(selected_df_scaled,iter.max = 100,centers = 4,nstart = 10)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
