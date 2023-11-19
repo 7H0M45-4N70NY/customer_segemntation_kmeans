@@ -109,28 +109,180 @@ sum(duplicated(new_data))
 2)extracted month values
 3)removed outiers from the data
 
-#doubts 
-invoice number stock code and customer Id are the unique fields
+#My thoughts & Further process
+* invoice number stock code and customer Id are the unique fields and is not benefical for this clustering still i am going to clean the inconsistencies in these fields
+
+*Conduct a EDA before going on towards RFM analysis to understand the trends
+
+* I am familiar with RFM analysis a marketing technique for customer segementation so i am going to create some features for Recency Frequency and monetary and a combiation of these is RFM value
+
+*Correct Skewness in the data 
+
+*Conduct EDA on RFM data Answer some key questions then  to standardise and clustering
+
+*To identify the features of customers in each of Clusters
+```{r}
+#library(stringr)
+#new_data$StockCode <- trimws(str_replace(new_data$StockCode, "[A-Za-z]$", ""))
+#new_data$StockCode <- as.numeric(new_data$StockCode)
+#new_data$InvoiceNo <- trimws(str_replace(new_data$InvoiceNo, "[A-Za-z]$", ""))
+#new_data$InvoiceNo <- as.numeric(new_data$InvoiceNo)
+#str(new_data)
+```
+Above Codes has been commented out because it indroduces a lot of NA values and we are not going to use those columns for clustering 
 
 ```{r}
-library(stringr)
-new_data$StockCode <- str_replace(new_data$StockCode, "[A-Za-z]$", "")
-new_data$StockCode <- as.numeric(new_data$StockCode)
-new_data$InvoiceNo <- str_replace(new_data$InvoiceNo, "[A-Za-z]$", "")
-new_data$InvoiceNo <- as.numeric(new_data$InvoiceNo)
-str(new_data)
-
-
-#Final cleaned values with no inconsistent data formats and no null or dupicate values
+#Final cleaned values with no inconsistent data formats and no null or duplicate values
+#Quantity column contains negative values which should be removed to actually have sensible data
 cleaned_data <-new_data%>%filter_all(all_vars(!is.na(.)))
 sum(is.na(cleaned_data))
+cleaned_data <- cleaned_data%>%filter(Quantity > 0)
+#Creating Revenue column
+cleaned_data$revenue <- cleaned_data$UnitPrice * cleaned_data$Quantity 
+
+```
+
+
+#EDA
+```{r}
+monthly_revenue <- cleaned_data%>%group_by(month)%>%summarise(sum=sum(revenue))
+ggplot(data=monthly_revenue,aes(x=month,y=sum))+
+  geom_line(color="Blue")+
+  labs(title="The trend of Revenue for different Months",x="months",y="Revenue")+
+  theme_minimal()
+monthly_orders <- cleaned_data%>%group_by(month)%>%summarise(sum=n())
+ggplot(data=monthly_orders,aes(x=month,y=sum))+
+  geom_line(color="green")+
+  labs(title="The trend  for no of orders in  different Months",x="months",y="No_of_orders")+
+  theme_minimal()
+```
+```{r}
+#Is there any seasonal customers in our data because we can see that from the months 
+#August to November there is a significant rise in orders which result in more revenue
+cleaned_data%>%group_by(CustomerID,month)%>%count()
+
+#Lets Not take month into consideration not because we can surely see a uptrend from months of august to november because they may just a seasonal trend  But we cannot also just neglect the fact that buying power of customers are most high in these months but for our purpose currently it not required
+```
+
+
+#Feature Engineering
+```{r}
+summary(cleaned_data)
+#Recency I will take difference in days from last date of purchase in this dataset
+#Frequency :Here the largest values are given score of 1 and d
+#Monetary :here also the largest values are ranked one 
+#These ranking will be based on the Quatile values
+last_date <- min(cleaned_data$InvoiceDate)
+recency_df <- cleaned_data%>%group_by(CustomerID)%>%summarise(Last_purchase=max(InvoiceDate))
+recency_df$Recency <- round(difftime(recency_df$Last_purchase,last_date,units = "days"))
+recency_df <- recency_df[,c(1,3)]
+recency_df$Recency =as.numeric(recency_df$Recency)
+
+
+freq_monetary_df <-cleaned_data%>%group_by(CustomerID)%>%
+  summarise(monetary = sum(revenue),freq = n())
+
+rfm_table <- inner_join(recency_df,freq_monetary_df,by="CustomerID")
+summary(rfm_table)
+```
+# We have so far created a column for monetary frequency and Recency Now we will asssign scores for these using some basic logic and created RFM value which basically is the concatenation of
+Recency Score + Frequency Score +Monetary Score 
+ex : 1 + 2+ 4  = 124  # This is not addition this is concatenation
+
+```{r}
+
+rfm_table$Recency_score <- if_else(rfm_table$Recency < 230 ,1,
+                                   if_else(rfm_table$Recency < 323 ,2,
+                                           if_else(rfm_table$Recency <356 ,3,4))) 
+rfm_table$Freq_score <- if_else(rfm_table$freq > 87 ,1,
+                                if_else(rfm_table$freq >36,2,
+                                        if_else(rfm_table$freq > 14 ,3,4)))
+rfm_table$Monetary_score <- if_else(rfm_table$monetary > 1126 ,1,
+                                    if_else(rfm_table$monetary >466 ,2,
+                                            if_else(rfm_table$monetary > 206 ,3,4)))
+#Here use sep="" inside paste function to avoid NAs during corecion 
+rfm_table$rfm_value <- as.numeric(paste(rfm_table$Recency_score,rfm_table$Freq_score,rfm_table$Monetary_score,sep=""))
+#View(rfm_table)
+
+
+```
+RFM segmentation readily shows customer for any business like Best Customers, Loyal Customer, Customers on the verge of losing, Highest revenue-generating customers etc.
+
+```{r}
+print(paste("Best Customer :" ,rfm_table%>%filter(rfm_value ==111)%>%count()))
+print(paste("Loyal Customer :" ,rfm_table%>%filter(Freq_score==1)%>%count()))
+print(paste("Big Spenders :" ,rfm_table%>%filter(Monetary_score==1)%>%count()))
+print(paste("Risk of Loosing :" ,rfm_table%>%filter(rfm_value==134)%>%count()))
+print(paste("Lost best customers :" ,rfm_table%>%filter(rfm_value==411)%>%count()))
+print(paste("Lost :" ,rfm_table%>%filter(rfm_value==344)%>%count()))
+print(paste("Lost Cheap Customer :" ,rfm_table%>%filter(rfm_value==444)%>%count()))
+#like this we can make out a lot of categories from RFM value
+
+```
+#Before using k-means to the data
+we have to make sure that
+
+Data’s distribution is not skewed    
+Data is standardised (i.e. mean of 0 and standard deviation of 1).
+
+You can use log transformation or min max scaling of R package to normalise your data here i am using log
+```{r}
+library(moments)
+#Visualising the distributions
+feature_cols <- c("Recency","freq","monetary")
+
+par(mfrow=c(3,1))
+for (feature in feature_cols){
+  hist(rfm_table[[feature]],col="blue",border="black",breaks = 30,main = paste("histogram of",feature,round(skewness(rfm_table[[feature]])),2))
+}
+par(mfrow=c(3,1))
+for (feature in feature_cols){
+  plot(density(rfm_table[[feature]]),main = paste("Density of",feature))
+}
 
 ```
 
 ```{r}
-str(cleaned_data)
-selected_df <- cleaned_data%>%select(c(InvoiceNo,StockCode,month,UnitPrice,Quantity))
-selected_df_scaled <-scale(selected_df,center=TRUE)
+# Selecting columns for clustering
+names(rfm_table)
+data_for_clustering <- rfm_table[,c(1:4)]
+
+#We will only transform monetary and frequency to reduce skewness  
+
+data_for_clustering$freq    <- log(data_for_clustering$freq+1)
+data_for_clustering$monetary    <- log(data_for_clustering$monetary+1)
+
+skewness(rfm_table)
+skewness(data_for_clustering)
+
+
+new_rfm_table <-data_for_clustering
+```
+
+```{r}
+par(mfrow=c(3,1))
+for (feature in feature_cols){
+  hist(new_rfm_table[[feature]],col="blue",border="black",breaks = 30,main = paste("histogram of",feature,round(skewness(new_rfm_table[[feature]])),2))
+}
+par(mfrow=c(3,1))
+for (feature in feature_cols){
+  plot(density(new_rfm_table[[feature]]),main = paste("Density of",feature))
+}
+```
+
+
+
+
+```{r}
+
+# Define preprocessing steps (centering scaling)
+preprocess_params <- preProcess(new_rfm_table[, -1], method = c("scale","center"))
+
+# Apply centering and scaling to the data
+normalized_scaled_data <- predict(preprocess_params, newdata = new_rfm_table )
+
+final_data <- normalized_scaled_data
+selected_df_scaled <-normalized_scaled_data
 
 ```
 
@@ -140,11 +292,24 @@ selected_df_scaled <-scale(selected_df,center=TRUE)
 #install.packages("factoextra")
 library(factoextra)
 #methods : wss silhouette gap_stat
+wss<- fviz_nbclust(selected_df_scaled,kmeans,method="wss")
+#gap_stat <- fviz_nbclust(selected_df_scaled, kmeans, method = "gap_stat")
+#silhouette <- fviz_nbclust(selected_df_scaled, kmeans, method = "silhouette")
+
+# Print the result
+print(wss)
+#print(gap_stat)
+#print(silhouette)
+
 
 ```
-```{r}
 
-find_k <-selected_df 
+
+
+
+```{r}
+selected_df <- selected_df_scaled
+find_k <-selected_df[,-1] 
 set.seed(123)
 sample_indices <- sample(nrow(find_k), size = 1000)  # You can adjust the sample size as needed
 sample_data <- find_k[sample_indices, ]
@@ -168,18 +333,75 @@ print(silhouette)
 
 
 ```{r}
-kmeans(selected_df_scaled,iter.max = 100,centers = 4,nstart = 10)
+km3 <- kmeans(selected_df_scaled[,-1],iter.max = 100,centers = 3,nstart = 10)
+km4 <- kmeans(selected_df_scaled[,-1],iter.max = 100,centers = 4,nstart = 10)
+km5 <- kmeans(selected_df_scaled[,-1],iter.max = 100,centers = 5,nstart = 10)
+km3
+km4
+km5
+```
+
+
+```{r}
+fviz_cluster(list(data = selected_df_scaled,cluster=km3$cluster))
+fviz_cluster(list(data = selected_df_scaled,cluster=km4$cluster))
+fviz_cluster(list(data = selected_df_scaled,cluster=km5$cluster))
+
+
 ```
 
 
 
+```{r}
+og_data <- rfm_table
+og_data$cluster <- km4$cluster
+og_data%>%group_by(cluster)%>%
+  summarise(r_mean = mean(Recency,trim=1),f_mean=mean(freq),m_mean=mean(monetary),cnt=n())
+
+og_scaled <- selected_df_scaled
+og_scaled$cluster <- km4$cluster
+og_scaled%>%group_by(cluster)%>%
+  summarise(r_mean = mean(Recency,trim=1),f_mean=mean(freq),m_mean=mean(monetary),cnt=n())
+
+library(reshape2)
+selected_df$cluster <-km4$cluster
+selected_df
+df_melt <-melt(data=selected_df[,-1],id.vars ="cluster",variable.name = "metric",value.name = "value" )
+
+
+ggplot(df_melt, aes(x = metric, y = value, fill = metric)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~cluster, nrow = 1) +
+  theme_minimal()
+
+
+```
 
 
 
+```{r}
+library(dplyr)
+
+# Calculate average values for each metric within each cluster
+avg_values <- df_melt %>%
+  group_by(cluster, metric) %>%
+  summarise(avg_value = mean(value)) %>%
+  ungroup()
 
 
+# Create the snake plot
+ggplot(avg_values, aes(x = metric, y = avg_value, color = as.factor(cluster))) +
+  geom_line(aes(group = cluster), size = 1.5) +
+  geom_point(size = 3) +
+  labs(title = "Snake Plot", x = "Metric", y = "Average Value") +
+  theme_minimal()
 
+```
 
+Cluster 1 : Best Customer                                Platinum
+Cluster 2 : Loyal Customers                              Gold
+Cluster 3 : Loosing Customers                            Bronze
+Cluster 4 : Passing by or Newer Customers                Silver
 
 
 
