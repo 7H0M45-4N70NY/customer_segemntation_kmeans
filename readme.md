@@ -1,4 +1,3 @@
-Great! Based on the information provided, here's a README structure for your project:
 
 ---
 
